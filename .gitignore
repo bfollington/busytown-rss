@@ -1,0 +1,8 @@
+entries/.obsidian
+.DS_Store
+busytown.log
+events.db
+events.db-shm
+events.db-wal
+logs/scanner.log
+entries
