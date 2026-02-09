@@ -3,9 +3,8 @@ description: Fetches an RSS/Atom feed URL and writes new entries to disk as mark
 listen:
   - "feeds.check"
 allowed_tools:
-  - "Bash(curl:*)"
+  - "Bash(deno:*)"
   - "Bash(busytown:*)"
-  - "Read"
   - "Write"
   - "Glob"
 ---
@@ -22,56 +21,44 @@ When you receive a `feeds.check` event:
    ```
    busytown events claim --worker scanner --db events.db --event <EVENT_ID>
    ```
-   If the claim response shows `claimed:false`, stop immediately — another
-   scanner instance already took this feed.
+   If the claim response shows `claimed:false`, stop immediately.
 
 2. Read `payload.url` — this is the feed URL to fetch.
 
-3. Fetch the feed XML:
-   ```bash
-   curl -sL --max-time 30 "<url>"
-   ```
-
-4. Parse the XML yourself by reading the text. Do NOT write helper scripts,
-   do NOT create .py or .sh files, do NOT install packages. You can read XML.
-   RSS feeds have `<item>` elements; Atom feeds have `<entry>` elements.
-
-5. Derive a feed slug from the feed title or domain. Lowercase kebab-case,
-   `[a-z0-9-]` only, collapse multiple hyphens.
-
-6. **Process only the 10 most recent entries.** Feeds can have hundreds of
-   entries going back years — we only want recent posts.
-
-7. For each of those 10 entries:
-   - Derive an entry slug from the title (lowercase, kebab-case, max 60 chars,
-     strip trailing hyphens).
-   - Check if `entries/<feed-slug>/<entry-slug>.md` already exists using Glob.
-     If it does, skip it (no event needed).
-   - Write the entry file:
-
-     ```markdown
+3. Write a Deno script to `_scanner.ts` that:
+   - Accepts the feed URL as a CLI argument
+   - Fetches the feed XML using `fetch()`
+   - Parses the XML using Deno's built-in DOM parser (`new DOMParser()`)
+   - Handles both RSS (`<item>`) and Atom (`<entry>`) feeds
+   - Derives a feed slug from the feed title (lowercase kebab-case, `[a-z0-9-]` only)
+   - Processes only the **10 most recent** entries
+   - For each entry, derives an entry slug from the title (lowercase kebab-case,
+     max 60 chars, strip trailing hyphens)
+   - Skips entries where `entries/<feed-slug>/<entry-slug>.md` already exists
+   - Writes new entries as markdown files to `entries/<feed-slug>/<entry-slug>.md`:
+     ```
      ---
      title: "Entry Title"
      url: https://example.com/post
-     date: 2026-02-09
+     date: YYYY-MM-DD
      feed: feed-slug
      ---
 
-     <content snippet — first ~500 words, or full text if short>
+     <content text, first ~500 words>
      ```
+   - For each new entry written, runs:
+     `busytown events push --worker scanner --db events.db --type entry.created --payload '{"feed":"<slug>","entry":"<slug>"}'`
+   - Prints a summary line to stdout: how many entries written, how many skipped
 
-   - Push an event for this new entry:
-     ```bash
-     busytown events push --worker scanner --db events.db \
-       --type entry.created \
-       --payload '{"feed":"<feed-slug>","entry":"<entry-slug>"}'
-     ```
+4. Run the script:
+   ```bash
+   deno run --allow-net --allow-read --allow-write --allow-run _scanner.ts "<url>"
+   ```
 
 ## Rules
 
-- Use `curl -sL` (silent, follow redirects).
-- **Do NOT create any files other than entry markdown files.** No scripts,
-  no temp files, no Python, no helper programs. Parse the XML directly from
-  the curl output stored in a variable.
-- If curl fails or returns non-XML, log the error to stdout and stop.
-- Only the 10 most recent entries. Skip older ones entirely.
+- Always write `_scanner.ts` fresh — don't assume a previous version exists.
+- Use Deno's built-in APIs: `fetch()`, `DOMParser`, `Deno.readDir`,
+  `Deno.writeTextFile`, `Deno.mkdir`, `Deno.Command`.
+- The script should handle errors gracefully and print diagnostics to stderr.
+- Only the 10 most recent entries per feed.

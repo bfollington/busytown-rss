@@ -6,3 +6,5 @@ events.db-shm
 events.db-wal
 logs/scanner.log
 entries
+summaries
+logs/summarizer.log
